@@ -1212,4 +1212,22 @@ typedef QueueHandle_t SemaphoreHandle_t;
     #define xSemaphoreGetStaticBuffer( xSemaphore, ppxSemaphoreBuffer )    xQueueGenericGetStaticBuffers( ( QueueHandle_t ) ( xSemaphore ), NULL, ( ppxSemaphoreBuffer ) )
 #endif /* configSUPPORT_STATIC_ALLOCATION */
 
+/*-----------------------------------------------------------*/
+/* SRP (Stack Resource Policy) binary semaphore.             */
+/*-----------------------------------------------------------*/
+#if ( ( configUSE_SRP == 1 ) && ( configUSE_EDF == 1 ) )
+
+/**
+ * Create a binary semaphore managed by the Stack Resource Policy.
+ *
+ * @param xMaxCriticalSectionLength  Worst-case critical section length in ticks.
+ * @return Handle to the created semaphore, or NULL on failure.
+ */
+    QueueHandle_t xQueueCreateSrpBinarySemaphore( TickType_t xMaxCriticalSectionLength );
+
+    #define xSemaphoreCreateBinarySRP( xMaxCS ) \
+        xQueueCreateSrpBinarySemaphore( ( xMaxCS ) )
+
+#endif /* configUSE_SRP && configUSE_EDF */
+
 #endif /* SEMAPHORE_H */

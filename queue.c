@@ -133,6 +133,10 @@ typedef struct QueueDefinition /* The old naming convention is used to prevent b
         UBaseType_t uxQueueNumber;
         uint8_t ucQueueType;
     #endif
+
+    #if ( configUSE_SRP == 1 )
+        UBaseType_t uxSrpResourceIndex; /**< Index into xSrpResources[]; configSRP_MAX_RESOURCES if not SRP. */
+    #endif
 } xQUEUE;
 
 /* The old xQUEUE name is maintained above then typedefed to the new Queue_t
@@ -608,6 +612,12 @@ static void prvInitialiseNewQueue( const UBaseType_t uxQueueLength,
     }
     #endif /* configUSE_QUEUE_SETS */
 
+    #if ( configUSE_SRP == 1 )
+    {
+        pxNewQueue->uxSrpResourceIndex = ( UBaseType_t ) configSRP_MAX_RESOURCES; /* sentinel: not SRP */
+    }
+    #endif /* configUSE_SRP */
+
     traceQUEUE_CREATE( pxNewQueue );
 }
 /*-----------------------------------------------------------*/
@@ -685,6 +695,46 @@ static void prvInitialiseNewQueue( const UBaseType_t uxQueueLength,
     }
 
 #endif /* configUSE_MUTEXES */
+/*-----------------------------------------------------------*/
+
+#if ( ( configUSE_SRP == 1 ) && ( configUSE_EDF == 1 ) && ( configSUPPORT_DYNAMIC_ALLOCATION == 1 ) )
+
+    QueueHandle_t xQueueCreateSrpBinarySemaphore( TickType_t xMaxCriticalSectionLength )
+    {
+        QueueHandle_t xNewQueue;
+
+        xNewQueue = xQueueGenericCreate( ( UBaseType_t ) 1, ( UBaseType_t ) 0,
+                                         queueQUEUE_TYPE_SRP_BINARY_SEMAPHORE );
+
+        if( xNewQueue != NULL )
+        {
+            Queue_t * const pxQueue = ( Queue_t * ) xNewQueue;
+
+            /* Register in the SRP resource table (lives in tasks.c). */
+            UBaseType_t uxIdx = uxTaskSrpRegisterResource( xNewQueue, xMaxCriticalSectionLength );
+
+            if( uxIdx < ( UBaseType_t ) configSRP_MAX_RESOURCES )
+            {
+                pxQueue->uxSrpResourceIndex = uxIdx;
+            }
+            else
+            {
+                /* Resource registry full — delete the queue and return NULL. */
+                vQueueDelete( xNewQueue );
+                xNewQueue = NULL;
+            }
+
+            if( xNewQueue != NULL )
+            {
+                /* Start in the "available" state (give the semaphore). */
+                ( void ) xQueueGenericSend( xNewQueue, NULL, ( TickType_t ) 0U, queueSEND_TO_BACK );
+            }
+        }
+
+        return xNewQueue;
+    }
+
+#endif /* configUSE_SRP && configUSE_EDF */
 /*-----------------------------------------------------------*/
 
 #if ( ( configUSE_MUTEXES == 1 ) && ( INCLUDE_xSemaphoreGetMutexHolder == 1 ) )
@@ -965,6 +1015,34 @@ BaseType_t xQueueGenericSend( QueueHandle_t xQueue,
         configASSERT( !( ( xTaskGetSchedulerState() == taskSCHEDULER_SUSPENDED ) && ( xTicksToWait != 0 ) ) );
     }
     #endif
+
+    /* SRP fast path for giving (releasing) an SRP binary semaphore. */
+    #if ( ( configUSE_SRP == 1 ) && ( configUSE_EDF == 1 ) )
+    {
+        if( pxQueue->uxSrpResourceIndex < ( UBaseType_t ) configSRP_MAX_RESOURCES )
+        {
+            BaseType_t xReturn;
+
+            taskENTER_CRITICAL();
+            {
+                configASSERT( pxQueue->uxMessagesWaiting < pxQueue->uxLength );
+
+                pxQueue->uxMessagesWaiting = ( UBaseType_t ) ( pxQueue->uxMessagesWaiting + ( UBaseType_t ) 1 );
+                vTaskSrpResourceGive( pxQueue->uxSrpResourceIndex );
+                xReturn = pdPASS;
+            }
+            taskEXIT_CRITICAL();
+
+            /* System ceiling dropped — a task deferred by the ceiling may
+             * now be eligible to preempt.  Yield to let the scheduler decide. */
+            portYIELD_WITHIN_API();
+
+            traceRETURN_xQueueGenericSend( xReturn );
+
+            return xReturn;
+        }
+    }
+    #endif /* configUSE_SRP && configUSE_EDF */
 
     for( ; ; )
     {
@@ -1682,6 +1760,32 @@ BaseType_t xQueueSemaphoreTake( QueueHandle_t xQueue,
         configASSERT( !( ( xTaskGetSchedulerState() == taskSCHEDULER_SUSPENDED ) && ( xTicksToWait != 0 ) ) );
     }
     #endif
+
+    /* SRP fast path: under SRP, a task should NEVER block on a resource.
+     * Acquire immediately and update the system ceiling. */
+    #if ( ( configUSE_SRP == 1 ) && ( configUSE_EDF == 1 ) )
+    {
+        if( pxQueue->uxSrpResourceIndex < ( UBaseType_t ) configSRP_MAX_RESOURCES )
+        {
+            BaseType_t xReturn;
+
+            taskENTER_CRITICAL();
+            {
+                /* SRP guarantees the resource is available — assert this. */
+                configASSERT( pxQueue->uxMessagesWaiting > ( UBaseType_t ) 0 );
+
+                pxQueue->uxMessagesWaiting = ( UBaseType_t ) ( pxQueue->uxMessagesWaiting - ( UBaseType_t ) 1 );
+                vTaskSrpResourceTake( pxQueue->uxSrpResourceIndex );
+                xReturn = pdPASS;
+            }
+            taskEXIT_CRITICAL();
+
+            traceRETURN_xQueueSemaphoreTake( xReturn );
+
+            return xReturn;
+        }
+    }
+    #endif /* configUSE_SRP && configUSE_EDF */
 
     for( ; ; )
     {

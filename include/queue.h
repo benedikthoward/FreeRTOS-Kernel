@@ -76,6 +76,7 @@ typedef struct QueueDefinition   * QueueSetMemberHandle_t;
 #define queueQUEUE_TYPE_BINARY_SEMAPHORE      ( ( uint8_t ) 3U )
 #define queueQUEUE_TYPE_RECURSIVE_MUTEX       ( ( uint8_t ) 4U )
 #define queueQUEUE_TYPE_SET                   ( ( uint8_t ) 5U )
+#define queueQUEUE_TYPE_SRP_BINARY_SEMAPHORE  ( ( uint8_t ) 6U )
 
 /**
  * queue. h

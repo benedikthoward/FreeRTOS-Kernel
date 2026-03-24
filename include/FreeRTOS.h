@@ -327,6 +327,30 @@
     #define configUSE_RECURSIVE_MUTEXES    0
 #endif
 
+#ifndef configUSE_EDF
+    #define configUSE_EDF    0
+#endif
+
+#ifndef configEDF_MAX_TASKS
+    #define configEDF_MAX_TASKS    8
+#endif
+
+#ifndef configUSE_SRP
+    #define configUSE_SRP    0
+#endif
+
+#ifndef configSRP_MAX_RESOURCES
+    #define configSRP_MAX_RESOURCES    16
+#endif
+
+#ifndef configSRP_CEILING_STACK_DEPTH
+    #define configSRP_CEILING_STACK_DEPTH    16
+#endif
+
+#ifndef configSRP_MAX_STACK_GROUPS
+    #define configSRP_MAX_STACK_GROUPS    32
+#endif
+
 #ifndef configUSE_MUTEXES
     #define configUSE_MUTEXES    0
 #endif
@@ -660,6 +684,30 @@
 /* Called before a task has been selected to run.  pxCurrentTCB holds a pointer
  * to the task control block of the task being switched out. */
     #define traceTASK_SWITCHED_OUT()
+#endif
+
+#ifndef traceEDF_DEADLINE_MISSED
+    #define traceEDF_DEADLINE_MISSED( pxTCB )
+#endif
+
+#ifndef traceSRP_CEILING_RAISED
+    #define traceSRP_CEILING_RAISED( uxResourceIdx, uxNewCeiling )
+#endif
+
+#ifndef traceSRP_CEILING_LOWERED
+    #define traceSRP_CEILING_LOWERED( uxResourceIdx, uxNewCeiling )
+#endif
+
+#ifndef traceCBS_BUDGET_EXHAUSTED
+    #define traceCBS_BUDGET_EXHAUSTED( pxTCB )
+#endif
+
+#ifndef traceCBS_JOB_ARRIVAL
+    #define traceCBS_JOB_ARRIVAL( pxTCB )
+#endif
+
+#ifndef traceMP_TASK_MIGRATED
+    #define traceMP_TASK_MIGRATED( pxTCB, xFromCore, xToCore )
 #endif
 
 #ifndef traceTASK_PRIORITY_INHERIT

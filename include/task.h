@@ -394,6 +394,249 @@ typedef enum
                             TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
 #endif
 
+#if ( configUSE_EDF == 1 )
+
+/**
+ * Create a periodic EDF-scheduled task.  Admission control is performed
+ * before the task is added to the ready list.
+ *
+ * @param pxTaskCode  Task entry function.
+ * @param pcName      Human-readable name.
+ * @param uxStackDepth Stack depth in words.
+ * @param pvParameters Parameter passed to the task function.
+ * @param xPeriod     T_i – period in ticks.
+ * @param xRelativeDeadline D_i – relative deadline in ticks (must be <= xPeriod).
+ * @param xWCET       C_i – worst-case execution time in ticks.
+ * @param pxCreatedTask  Optional handle output.
+ * @return pdPASS on success, errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY on memory
+ *         failure, or errEDF_ADMISSION_FAILED if the task set is not schedulable.
+ */
+    #define errEDF_ADMISSION_FAILED    ( -2 )
+
+    BaseType_t xTaskCreateEDF( TaskFunction_t pxTaskCode,
+                               const char * const pcName,
+                               const configSTACK_DEPTH_TYPE uxStackDepth,
+                               void * const pvParameters,
+                               TickType_t xPeriod,
+                               TickType_t xRelativeDeadline,
+                               TickType_t xWCET,
+                               TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
+/**
+ * Create a sporadic (event-triggered) EDF-scheduled task.
+ * The task starts idle and must be released via xTaskEdfReleaseJobFromISR().
+ * xMinInterArrival is used as the period for admission control.
+ */
+    BaseType_t xTaskCreateEDFSporadic( TaskFunction_t pxTaskCode,
+                                       const char * const pcName,
+                                       const configSTACK_DEPTH_TYPE uxStackDepth,
+                                       void * const pvParameters,
+                                       TickType_t xMinInterArrival,
+                                       TickType_t xRelativeDeadline,
+                                       TickType_t xWCET,
+                                       TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
+/**
+ * Called by an EDF task when it has completed its current job.
+ * For periodic tasks: waits for the next period.
+ * For sporadic tasks: goes idle until released again via ISR.
+ */
+    void vTaskEdfWaitForNextPeriod( void ) PRIVILEGED_FUNCTION;
+
+/**
+ * Release an EDF job from an ISR (e.g., button press).
+ * For sporadic tasks, enforces minimum inter-arrival time.
+ *
+ * @return pdPASS if the job was released, pdFAIL if rejected (too soon / still active).
+ */
+    BaseType_t xTaskEdfReleaseJobFromISR( TaskHandle_t xTask,
+                                          BaseType_t * pxHigherPriorityTaskWoken ) PRIVILEGED_FUNCTION;
+
+/**
+ * Update the absolute deadline of an EDF task from an ISR and re-sort.
+ */
+    BaseType_t xTaskEdfSetDeadlineFromISR( TaskHandle_t xTask,
+                                           TickType_t xNewAbsoluteDeadline,
+                                           BaseType_t * pxHigherPriorityTaskWoken ) PRIVILEGED_FUNCTION;
+
+/**
+ * Test whether a task with the given (C, D, T) would pass admission control
+ * without actually creating the task.  Returns pdPASS if admissible.
+ */
+    BaseType_t xTaskEdfTestAdmission( TickType_t xWCET,
+                                      TickType_t xRelativeDeadline,
+                                      TickType_t xPeriod ) PRIVILEGED_FUNCTION;
+
+#endif /* configUSE_EDF */
+
+/*-----------------------------------------------------------*/
+/* CBS (Constant Bandwidth Server) APIs                      */
+/*-----------------------------------------------------------*/
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_CBS == 1 ) )
+
+    /**
+     * Create a Constant Bandwidth Server task.
+     *
+     * @param pxTaskCode    Task entry function (aperiodic workload).
+     * @param pcName        Human-readable name.
+     * @param uxStackDepth  Stack depth in words.
+     * @param pvParameters  Parameter passed to the task function.
+     * @param xBudget       Q_s — maximum execution budget per server period (ticks).
+     * @param xServerPeriod T_s — server replenishment period (ticks).
+     * @param pxCreatedTask Optional handle output.
+     * @return pdPASS, errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY, or errEDF_ADMISSION_FAILED.
+     */
+    BaseType_t xTaskCreateCBS( TaskFunction_t pxTaskCode,
+                                const char * const pcName,
+                                const configSTACK_DEPTH_TYPE uxStackDepth,
+                                void * const pvParameters,
+                                TickType_t xBudget,
+                                TickType_t xServerPeriod,
+                                TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
+    /**
+     * Release a new aperiodic job to a CBS server (task context).
+     * Returns pdFAIL if the server's previous job is still active.
+     */
+    BaseType_t xTaskCbsReleaseJob( TaskHandle_t xTask ) PRIVILEGED_FUNCTION;
+
+    /**
+     * Release a new aperiodic job to a CBS server (ISR context).
+     */
+    BaseType_t xTaskCbsReleaseJobFromISR( TaskHandle_t xTask,
+                                           BaseType_t * pxHigherPriorityTaskWoken ) PRIVILEGED_FUNCTION;
+
+    /**
+     * Called by a CBS task when its aperiodic job is complete.
+     * The server becomes idle; budget and deadline are preserved.
+     */
+    void vTaskCbsWaitForNextJob( void ) PRIVILEGED_FUNCTION;
+
+#endif /* configUSE_EDF && configUSE_CBS */
+
+/*-----------------------------------------------------------*/
+/* MP (Multiprocessor) APIs                                  */
+/*-----------------------------------------------------------*/
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_MP == 1 ) )
+
+    /**
+     * Create an EDF task pinned to a specific core (partitioned EDF).
+     * Same parameters as xTaskCreateEDF plus xCoreID (0 or 1).
+     */
+    BaseType_t xTaskCreateEDFPartitioned( TaskFunction_t pxTaskCode,
+                                           const char * const pcName,
+                                           const configSTACK_DEPTH_TYPE uxStackDepth,
+                                           void * const pvParameters,
+                                           TickType_t xPeriod,
+                                           TickType_t xRelativeDeadline,
+                                           TickType_t xWCET,
+                                           BaseType_t xCoreID,
+                                           TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
+    /**
+     * Create an EDF task with automatic Worst-Fit Decreasing partitioning.
+     * Kernel picks the core with the lowest utilization.
+     */
+    BaseType_t xTaskCreateEDFAutoPartition( TaskFunction_t pxTaskCode,
+                                             const char * const pcName,
+                                             const configSTACK_DEPTH_TYPE uxStackDepth,
+                                             void * const pvParameters,
+                                             TickType_t xPeriod,
+                                             TickType_t xRelativeDeadline,
+                                             TickType_t xWCET,
+                                             TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
+    /**
+     * Migrate an EDF task to a different core.
+     * Returns pdPASS on success, pdFAIL if the target core cannot admit the task.
+     */
+    BaseType_t xTaskMpMigrate( TaskHandle_t xTask,
+                                BaseType_t xTargetCore ) PRIVILEGED_FUNCTION;
+
+    /**
+     * Query a core's current total utilization (fixed-point, scale 10000).
+     */
+    uint32_t ulTaskMpGetCoreUtilization( BaseType_t xCoreID ) PRIVILEGED_FUNCTION;
+
+#endif /* configUSE_EDF && configUSE_MP */
+
+/*-----------------------------------------------------------*/
+/* SRP (Stack Resource Policy) APIs                          */
+/*-----------------------------------------------------------*/
+#if ( ( configUSE_EDF == 1 ) && ( configUSE_SRP == 1 ) )
+
+/* Forward-declare QueueHandle_t so task.h can be included without queue.h. */
+struct QueueDefinition;
+typedef struct QueueDefinition * SrpQueueHandle_t;
+
+/**
+ * Register a new SRP resource in the kernel.  Called by xSemaphoreCreateBinarySRP().
+ *
+ * @param xSemaphore      The queue handle of the SRP binary semaphore.
+ * @param xMaxCS          Worst-case critical section length in ticks.
+ * @return Index into the SRP resource registry, or configSRP_MAX_RESOURCES on failure.
+ */
+    UBaseType_t uxTaskSrpRegisterResource( SrpQueueHandle_t xSemaphore,
+                                            TickType_t xMaxCS ) PRIVILEGED_FUNCTION;
+
+/**
+ * Declare that a task uses an SRP resource.  Updates the resource ceiling.
+ * Call after creating both the task and the semaphore, before starting the scheduler.
+ *
+ * @param xTask       Handle of the EDF task.
+ * @param xSemaphore  Handle of the SRP binary semaphore.
+ * @return pdPASS on success.
+ */
+    BaseType_t xTaskSrpDeclareUsage( TaskHandle_t xTask,
+                                      SrpQueueHandle_t xSemaphore ) PRIVILEGED_FUNCTION;
+
+/**
+ * Compute blocking times (B_i) for all tasks and re-run admission control
+ * including SRP blocking.  Call after all resource declarations are done.
+ *
+ * @return pdPASS if the task set is schedulable with SRP blocking, pdFAIL otherwise.
+ */
+    BaseType_t xTaskSrpFinalizeAdmission( void ) PRIVILEGED_FUNCTION;
+
+/**
+ * Called from xQueueSemaphoreTake — push system ceiling, record holder.
+ */
+    void vTaskSrpResourceTake( UBaseType_t uxResourceIdx ) PRIVILEGED_FUNCTION;
+
+/**
+ * Called from xQueueGenericSend — pop system ceiling, clear holder.
+ */
+    void vTaskSrpResourceGive( UBaseType_t uxResourceIdx ) PRIVILEGED_FUNCTION;
+
+/**
+ * Create an EDF task that shares its runtime stack with other tasks at the same
+ * preemption level (same relative deadline).  Under SRP, such tasks can never
+ * be active simultaneously, so sharing is safe.
+ *
+ * Same parameters as xTaskCreateEDF().
+ */
+    BaseType_t xTaskCreateEDFSharedStack( TaskFunction_t pxTaskCode,
+                                           const char * const pcName,
+                                           const configSTACK_DEPTH_TYPE uxStackDepth,
+                                           void * const pvParameters,
+                                           TickType_t xPeriod,
+                                           TickType_t xRelativeDeadline,
+                                           TickType_t xWCET,
+                                           TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
+/**
+ * Query stack sharing statistics.
+ *
+ * @param puxGroups            Number of distinct preemption level groups.
+ * @param puxTotalMemShared    Total stack memory allocated with sharing (bytes).
+ * @param puxTotalMemIndividual  Total stack memory that would be allocated without sharing (bytes).
+ */
+    void vTaskSrpGetStackStats( UBaseType_t * puxGroups,
+                                 UBaseType_t * puxTotalMemShared,
+                                 UBaseType_t * puxTotalMemIndividual ) PRIVILEGED_FUNCTION;
+
+#endif /* configUSE_EDF && configUSE_SRP */
+
 #if ( ( configSUPPORT_DYNAMIC_ALLOCATION == 1 ) && ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
     BaseType_t xTaskCreateAffinitySet( TaskFunction_t pxTaskCode,
                                        const char * const pcName,
