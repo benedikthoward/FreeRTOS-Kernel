@@ -467,6 +467,23 @@ typedef enum
                                       TickType_t xRelativeDeadline,
                                       TickType_t xPeriod ) PRIVILEGED_FUNCTION;
 
+/**
+ * Create a periodic EDF task, bypassing admission control.
+ *
+ * Intended for deliberate-overload demos where U > 1 is required to exercise
+ * deadline-miss handling.  Still fails with errEDF_ADMISSION_FAILED if the
+ * registry is full (configEDF_MAX_TASKS reached).  Do not use in production:
+ * admitted overload will cause deadline misses.
+ */
+    BaseType_t xTaskCreateEDFForced( TaskFunction_t pxTaskCode,
+                                     const char * const pcName,
+                                     const configSTACK_DEPTH_TYPE uxStackDepth,
+                                     void * const pvParameters,
+                                     TickType_t xPeriod,
+                                     TickType_t xRelativeDeadline,
+                                     TickType_t xWCET,
+                                     TaskHandle_t * const pxCreatedTask ) PRIVILEGED_FUNCTION;
+
 #endif /* configUSE_EDF */
 
 /*-----------------------------------------------------------*/

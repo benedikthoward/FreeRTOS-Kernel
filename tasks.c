@@ -2422,15 +2422,16 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                  * not placed in the EDF ready list until released by ISR. */
                 pxNewTCB->uxEdfFlags &= ~tskEDF_FLAG_JOB_ACTIVE;
 
-                /* Still need to call prvAddNewTaskToReadyList to update
-                 * uxCurrentNumberOfTasks etc., but the task will immediately
-                 * suspend itself because it has no active job.  We add it
-                 * to the standard ready list temporarily. */
-                prvAddNewTaskToReadyList( pxNewTCB );
-
-                /* Move the sporadic task out of the ready list into a
-                 * suspended state — it will be released by ISR. */
-                vTaskSuspend( ( TaskHandle_t ) pxNewTCB );
+                /* Add-to-ready + suspend must be atomic — otherwise the
+                 * yield inside prvAddNewTaskToReadyList dispatches the task
+                 * before vTaskSuspend runs, letting it execute a phantom
+                 * initial job. Same race as in xTaskCreateCBS. */
+                taskENTER_CRITICAL();
+                {
+                    prvAddNewTaskToReadyList( pxNewTCB );
+                    vTaskSuspend( ( TaskHandle_t ) pxNewTCB );
+                }
+                taskEXIT_CRITICAL();
 
                 xReturn = pdPASS;
             }
@@ -2444,6 +2445,44 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 #endif
                 xReturn = errEDF_ADMISSION_FAILED;
             }
+        }
+        else
+        {
+            xReturn = errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
+        }
+
+        return xReturn;
+    }
+/*-----------------------------------------------------------*/
+
+    BaseType_t xTaskCreateEDFForced( TaskFunction_t pxTaskCode,
+                                     const char * const pcName,
+                                     const configSTACK_DEPTH_TYPE uxStackDepth,
+                                     void * const pvParameters,
+                                     TickType_t xPeriod,
+                                     TickType_t xRelativeDeadline,
+                                     TickType_t xWCET,
+                                     TaskHandle_t * const pxCreatedTask )
+    {
+        /* Like xTaskCreateEDF but skips the admission check. Intended for
+         * overload/stress demos where we deliberately drive U > 1 to observe
+         * deadline-miss handling. Still enforces the registry capacity limit. */
+        TCB_t * pxNewTCB;
+        BaseType_t xReturn;
+
+        if( uxEdfTaskCount >= ( UBaseType_t ) configEDF_MAX_TASKS )
+        {
+            return errEDF_ADMISSION_FAILED;
+        }
+
+        pxNewTCB = prvCreateTask( pxTaskCode, pcName, uxStackDepth, pvParameters,
+                                  ( UBaseType_t ) ( configMAX_PRIORITIES - 2 ), pxCreatedTask );
+
+        if( pxNewTCB != NULL )
+        {
+            prvEdfInitialiseTask( pxNewTCB, xPeriod, xRelativeDeadline, xWCET, ( UBaseType_t ) 0U );
+            prvAddNewTaskToReadyList( pxNewTCB );
+            xReturn = pdPASS;
         }
         else
         {
@@ -2491,10 +2530,19 @@ static void prvAddNewTaskToReadyList( TCB_t * pxNewTCB ) PRIVILEGED_FUNCTION;
                 pxNewTCB->uxEdfFlags &= ~tskEDF_FLAG_JOB_ACTIVE;
                 pxNewTCB->uxEdfFlags |= tskEDF_FLAG_CBS_IDLE;
 
-                prvAddNewTaskToReadyList( pxNewTCB );
-
-                /* Move to suspended — released when job arrives. */
-                vTaskSuspend( ( TaskHandle_t ) pxNewTCB );
+                /* Add-to-ready + suspend must be atomic. prvAddNewTaskToReadyList
+                 * yields when the new task outranks the current one (it does —
+                 * priority 30 vs scenario task's 1), which would dispatch the CBS
+                 * task and let it run a "phantom" job before we got to
+                 * vTaskSuspend. Without JOB_ACTIVE set during that phantom run,
+                 * the budget tracking silently skipped the server — root cause
+                 * of missing #CB events. */
+                taskENTER_CRITICAL();
+                {
+                    prvAddNewTaskToReadyList( pxNewTCB );
+                    vTaskSuspend( ( TaskHandle_t ) pxNewTCB );
+                }
+                taskEXIT_CRITICAL();
 
                 xReturn = pdPASS;
             }
@@ -4048,8 +4096,13 @@ static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
 
         configASSERT( uxResourceIdx < uxSrpResourceCount );
 
-        /* SRP invariant: caller's preemption level must exceed the system ceiling. */
-        configASSERT( pxTCB->uxPreemptionLevel > prvSrpSystemCeiling() );
+        /* SRP invariant for the running task: its preemption level must be at
+         * least the system ceiling. Strict inequality is required for
+         * preemption (scheduler check in taskSELECT_HIGHEST_PRIORITY_TASK), but
+         * a running task holding a resource may have raised the ceiling to its
+         * own pi — subsequent nested takes by that same task are legal even
+         * when pi == ceiling. */
+        configASSERT( pxTCB->uxPreemptionLevel >= prvSrpSystemCeiling() );
 
         taskENTER_CRITICAL();
         {

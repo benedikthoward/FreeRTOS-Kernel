@@ -713,21 +713,22 @@ static void prvInitialiseNewQueue( const UBaseType_t uxQueueLength,
             /* Register in the SRP resource table (lives in tasks.c). */
             UBaseType_t uxIdx = uxTaskSrpRegisterResource( xNewQueue, xMaxCriticalSectionLength );
 
-            if( uxIdx < ( UBaseType_t ) configSRP_MAX_RESOURCES )
-            {
-                pxQueue->uxSrpResourceIndex = uxIdx;
-            }
-            else
+            if( uxIdx >= ( UBaseType_t ) configSRP_MAX_RESOURCES )
             {
                 /* Resource registry full — delete the queue and return NULL. */
                 vQueueDelete( xNewQueue );
                 xNewQueue = NULL;
             }
-
-            if( xNewQueue != NULL )
+            else
             {
-                /* Start in the "available" state (give the semaphore). */
-                ( void ) xQueueGenericSend( xNewQueue, NULL, ( TickType_t ) 0U, queueSEND_TO_BACK );
+                /* Start in the "available" state. Setting uxMessagesWaiting
+                 * directly bypasses the SRP give fastpath, which would assert
+                 * xHolder == pxCurrentTCB — false here, since no task has
+                 * taken the semaphore yet. Only after the initial availability
+                 * is set do we stamp the resource index so the fastpath kicks
+                 * in for subsequent take/give calls. */
+                pxQueue->uxMessagesWaiting = ( UBaseType_t ) 1;
+                pxQueue->uxSrpResourceIndex = uxIdx;
             }
         }
 
